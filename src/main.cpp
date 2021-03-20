@@ -103,24 +103,19 @@ std::pair<int, int> create_self_pipe() {
 }
 
 bool wait_for_next_trigger() {
-  if (pc_loop_use_select) {
-    FD_ZERO(&pc_loop_fd_set);
-    int nfds = 0;
-    for (std::vector<int>::const_iterator it = pc_loop_fd_list.begin();
-         it != pc_loop_fd_list.end(); ++it) {
-      int const fd = *it;
-      nfds = std::max(nfds, *it + 1);
-      FD_SET(fd, &pc_loop_fd_set);
+  FD_ZERO(&pc_loop_fd_set);
+  int nfds = 0;
+  for (std::vector<int>::const_iterator it = pc_loop_fd_list.begin();
+       it != pc_loop_fd_list.end(); ++it) {
+    int const fd = *it;
+    nfds = std::max(nfds, *it + 1);
+    FD_SET(fd, &pc_loop_fd_set);
+  }
+  timeval timeout = {refreshdelay, 0};
+  if (select(nfds, &pc_loop_fd_set, 0, 0, &timeout) != -1) {
+    if (FD_ISSET(self_pipe.first, &pc_loop_fd_set)) {
+      return false;
     }
-    timeval timeout = {refreshdelay, 0};
-    if (select(nfds, &pc_loop_fd_set, 0, 0, &timeout) != -1) {
-      if (FD_ISSET(self_pipe.first, &pc_loop_fd_set)) {
-        return false;
-      }
-    }
-  } else {
-    // If select() not possible, pause to prevent 100%
-    usleep(1000);
   }
   return true;
 }
@@ -337,11 +332,17 @@ int main(int argc, char **argv) {
       }
     }
 
-    // if not packets, do a select() until next packet
-    if (!packets_read)
-      if (!wait_for_next_trigger())
+    if (pc_loop_use_select) {
+      if (!wait_for_next_trigger()) {
         // Shutdown requested - exit the loop
         break;
+      }
+    } else {
+      if (!packets_read) {
+        // If select() not possible and no packets, pause to prevent 100%
+        usleep(1000);
+      }
+    }
   }
 
   clean_up();
